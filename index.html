@@ -1,0 +1,143 @@
+import React, { useRef, useCallback, useState, useMemo, useEffect } from "react";
+
+export default function Home() {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rafRef = useRef<number | null>(null);
+  const [showCanvas, setShowCanvas] = useState(false);
+  const [buttonPressed, setButtonPressed] = useState(false);
+
+  const hornAudio = useMemo(() => {
+    const audio = new Audio("/horn.mp3");
+    audio.preload = "auto";
+    return audio;
+  }, []);
+
+  const playPartyHorn = useCallback(() => {
+    try {
+      hornAudio.currentTime = 0;
+      hornAudio.play().catch(() => {});
+    } catch (e) {}
+  }, [hornAudio]);
+
+  const processFrame = useCallback(() => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) return;
+
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return;
+
+    if (video.ended || video.paused) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      setShowCanvas(false);
+      return;
+    }
+
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    const vw = video.videoWidth || 1;
+    const vh = video.videoHeight || 1;
+    const scale = Math.max(canvas.width / vw, canvas.height / vh);
+    const dw = vw * scale;
+    const dh = vh * scale;
+    const dx = (canvas.width - dw) / 2;
+    const dy = (canvas.height - dh) / 2;
+
+    ctx.drawImage(video, dx, dy, dw, dh);
+
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const d = imageData.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const r = d[i], g = d[i + 1], b = d[i + 2];
+      const brightness = (r + g + b) / 3;
+      const saturation = Math.max(r, g, b) - Math.min(r, g, b);
+      if (brightness < 60 && saturation < 40) {
+        d[i + 3] = 0;
+      } else if (brightness < 100 && saturation < 30) {
+        d[i + 3] = Math.round((brightness / 100) * 255 * 0.5);
+      }
+    }
+    ctx.putImageData(imageData, 0, 0);
+
+    rafRef.current = requestAnimationFrame(processFrame);
+  }, []);
+
+  const playConfettiVideo = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.currentTime = 0;
+    setShowCanvas(true);
+    video.play().then(() => {
+      rafRef.current = requestAnimationFrame(processFrame);
+    }).catch(() => {});
+  }, [processFrame]);
+
+  const handleAction = useCallback(() => {
+    if (navigator.vibrate) {
+      try { navigator.vibrate(100); } catch (e) {}
+    }
+    setButtonPressed(true);
+    setTimeout(() => setButtonPressed(false), 120);
+    playPartyHorn();
+    playConfettiVideo();
+  }, [playPartyHorn, playConfettiVideo]);
+
+  useEffect(() => {
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, []);
+
+  return (
+    <div className="min-h-[100dvh] w-full flex flex-col items-center justify-center bg-white font-sans p-4 select-none">
+      <video
+        ref={videoRef}
+        playsInline
+        style={{ display: "none" }}
+        onEnded={() => {
+          if (rafRef.current) cancelAnimationFrame(rafRef.current);
+          const canvas = canvasRef.current;
+          if (canvas) canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+          setShowCanvas(false);
+        }}
+      >
+        <source src="/confetti.mp4" type="video/mp4" />
+      </video>
+
+      <canvas
+        ref={canvasRef}
+        style={{
+          position: "fixed", top: 0, left: 0,
+          width: "100%", height: "100%",
+          pointerEvents: "none", zIndex: 9999,
+          display: showCanvas ? "block" : "none",
+        }}
+      />
+
+      <div className="w-full max-w-[700px] p-6 bg-white">
+        <div className="flex flex-col items-center text-center">
+          <h1 className="text-black font-black tracking-widest text-sm sm:text-base mb-6" style={{ fontVariant: "small-caps" }}>
+            ⚡ ФАН-ФАКТ ДНЯ ⚡
+          </h1>
+
+          <div className="text-black text-left text-base sm:text-lg leading-[1.65] space-y-4 font-medium px-2 sm:px-6">
+            <p>Гиммлер выступал на мюнхенских маскарадах в костюме турецкого султана Абдул-Хамида.</p>
+          </div>
+
+          <button
+            onClick={handleAction}
+            className="mt-10 mb-4 bg-black text-white font-bold text-xl sm:text-2xl py-4 px-8 rounded-full w-[90%] max-w-[280px] transition-all duration-100 uppercase tracking-wide cursor-pointer flex justify-center items-center"
+            style={{
+              boxShadow: buttonPressed ? "0 3px 0 #333" : "0 6px 0 #333",
+              transform: buttonPressed ? "translateY(3px) scale(0.97)" : "translateY(0) scale(1)",
+            }}
+          >
+            Понял
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
